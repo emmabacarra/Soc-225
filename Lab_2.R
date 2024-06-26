@@ -127,6 +127,12 @@ data_clean$Brand <- as.factor(data_clean$Brand)
 
 # TASK 7 ***********************************************************************
 # Verify the data type of the "Brand" column. How many levels are there?
+typeof(data_clean$Brand)
+# int
+
+unique(data_clean$Brand)
+# [1] E-Trade   Budweiser Bud Light Pepsi     NFL       Toyota    Doritos   Coca-Cola Hyundai   Kia      
+# Levels: Bud Light Budweiser Coca-Cola Doritos E-Trade Hyundai Kia NFL Pepsi Toyota
 
 
 # DATA TRANSFORMATION
@@ -137,25 +143,35 @@ data_clean$Youtube.Popularity <- cut(data_clean$Youtube.Views, breaks = c(0, 500
 
 # TASK 8 ***********************************************************************
 # How many ads fall into each popularity group? Hint: Use the table() function to find out.
-
+table(data_clean$Youtube.Popularity)
+# Low Medium   High  Viral 
+# 45     59     81     22 
 
 # We'll finish up by summarizing our cleaned data using the summary() function to get a sense of the distribution of each variable.
 summary(data_clean)
 
 # TASK 9 ***********************************************************************
 # Based on the summary output, what is the mean and median of the "TV.Viewers" column?
+summary(data_clean$TV.Viewers)[4]
+# Mean   :100.48
+summary(data_clean$TV.Viewers)[3]
+# Median : 98.73
 
 
 # TASK 10***********************************************************************
 # Create a new dataframe that contains only ads who are categorized as "Medium" popularity and have an "Length" greater than the median length. Save this new dataframe as long_and_popular.
+long_and_popular = subset(data_clean, Youtube.Popularity == "Medium" & Length > summary(data_clean$TV.Viewers)[4][[1]])
 
 
 # TASK 11 **********************************************************************
 # How many ads meet the criteria for the long_and_popular data frame?
+length(long_and_popular)
+# 17
 
 
 # That's it for Lab 2! You've learned how to import data, understand its structure, handle missing values, perform basic cleaning, and transform data. These skills will be crucial as we move on to more advanced data manipulation and analysis techniques.
 
 # Quick Question: Please rate the difficulty of this lab from 1 to 5.
+1
 
 # Be sure to SAVE THIS FILE and upload it to Canvas when you have completed all tasks. Please submit as a .R file.

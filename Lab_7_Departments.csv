@@ -1,0 +1,11 @@
+dept_id,dept_name,manager_id
+1,HR,91
+2,Engineering,13
+3,Marketing,84
+4,Sales,10
+5,Finance,94
+6,IT,41
+7,Legal,12
+8,Operations,8
+9,Admin,71
+10,R&D,15

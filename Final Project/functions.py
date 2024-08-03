@@ -10,17 +10,16 @@ from IPython.display import clear_output
 import torch
 import logging
 
-class net:
-    def __init__(self, model, trloader, valoader, batch_size, linear=True):
+class experiment:
+    def __init__(self, model, trloader, valoader, batch_size):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.trloader = trloader
         self.valoader = valoader
         # self.teloader = teloader
         self.batch_size = batch_size
-        self.linear = linear
         
-        self.x_dim = self.trloader.dataset[0][0].size()[1]*self.trloader.dataset[0][0].size()[2]
+        # self.x_dim = self.trloader.dataset[0][0].size()[1]*self.trloader.dataset[0][0].size()[2]
         self.train_size = len(self.trloader.dataset)
 
     def save_checkpoint(self, epoch, optimizer, path='checkpoint.pth'):
@@ -41,7 +40,7 @@ class net:
         else:
             raise FileNotFoundError(f"No checkpoint found at '{path}'")
     
-    def train(self, optimizer, lsfn, epochs, kl_weight, live_plot=False, outliers=True, view_interval=100, averaging=True):
+    def train(self, optimizer, lsfn, epochs, live_plot=False, outliers=True, view_interval=100, averaging=True):
         # ========================== Logger Configuration ==========================
         torch.backends.cudnn.benchmark = True
         torch.set_printoptions(profile="full")
@@ -72,13 +71,9 @@ class net:
         absolute_loss = 0
         self.epoch = 0
 
-        params = [tuple(self.model.params().items()),
-                  tuple(self.model.encoder.params().items()),
-                  tuple(self.model.decoder.params().items())]
+        params = [tuple(self.model.params().items())]
         logger.info(f'Training initiated with the following parameters:'
-                    f'\nModel Parameters: {params[0]}'
-                    f'\nEncoder Parameters: {params[1]}'
-                    f'\nDecoder Parameters: {params[2]}\n')
+                    f'\nModel Parameters: {params[0]}\n')
         
         start_time = time.time()
         try:
@@ -87,18 +82,16 @@ class net:
                 # ========================= training losses =========================
                 self.model.train()
                 loss_ct, counter = 0, 0
-                for i, (batch, _) in enumerate(self.trloader):
+                for i, (batch, labels) in enumerate(self.trloader):
                     batch_start = time.time()
                     counter += 1
 
-                    if self.linear:
-                        batch = batch.view(self.batch_size, self.x_dim)
-                    batch = batch.to(self.device)
-
+                    batch, labels = batch.to(self.device), labels.to(self.device)
+                    batch = batch.unsqueeze(1) # <-- add channel dimension
                     optimizer.zero_grad()
 
-                    outputs, mean, log_var = self.model(batch)
-                    batch_loss, reconstruction_loss, KLD = lsfn(batch, outputs, mean, log_var, kl_weight)
+                    outputs = self.model(batch)
+                    batch_loss = lsfn(outputs, labels)
                     loss_ct += batch_loss.item()
                     absolute_loss += batch_loss.item()
 
@@ -107,7 +100,7 @@ class net:
                     minutes, seconds = divmod(int(elapsed_time), 60)
                     learning_rate = optimizer.param_groups[0]['lr']
 
-                    batch_log = f'({int(minutes)}m {int(seconds):02d}s) | [{epoch}/{epochs}] Batch {i} ({batch_time:.3f}s) | LR: {learning_rate} | KLD: {KLD:.3f}, KLW: {kl_weight}, Rec. Loss: {reconstruction_loss:.3f} | Loss: {batch_loss.item():.2f} | Abs. Loss: {absolute_loss:.2f}'
+                    batch_log = f'({int(minutes)}m {int(seconds):02d}s) | [{epoch}/{epochs}] Batch {i} ({batch_time:.3f}s) | LR: {learning_rate} | Loss: {batch_loss.item():.4f} | Abs. Loss: {absolute_loss:.2f}'
                     logger.info(batch_log)
                     batch_times.append(batch_time)
 
@@ -156,14 +149,13 @@ class net:
                 self.model.eval()
                 with torch.no_grad():
                     tot_valoss = 0
-                    for batch, _ in self.valoader:
+                    for batch, labels in self.valoader:
 
-                        if self.linear:
-                            batch = batch.view(self.batch_size, self.x_dim)
-                        batch = batch.to(self.device)
+                        batch, labels = batch.to(self.device), labels.to(self.device)
+                        batch = batch.unsqueeze(1)  # <-- add channel dimension
 
-                        outputs, mean, log_var = self.model(batch)
-                        batch_loss, reconstruction_loss, KLD = lsfn(batch, outputs, mean, log_var, kl_weight)
+                        outputs = self.model(batch)
+                        batch_loss = lsfn(outputs, labels)
 
                         tot_valoss += batch_loss.item()
 
@@ -174,7 +166,7 @@ class net:
                     minutes, seconds = divmod(int(elapsed_time), 60)
                     learning_rate = optimizer.param_groups[0]['lr']
 
-                    val_log = f'({int(minutes)}m {int(seconds):02d}s) | VALIDATION (Epoch {epoch}/{epochs}) | LR: {learning_rate} | KLD: {KLD:.3f}, KLW: {kl_weight}, Rec. Loss: {reconstruction_loss:.3f} | Loss: {avg_val_loss:.2f} |  Abs. Loss: {absolute_loss:.2f} -----------'
+                    val_log = f'({int(minutes)}m {int(seconds):02d}s) | VALIDATION (Epoch {epoch}/{epochs}) | LR: {learning_rate} | Loss: {avg_val_loss:.4f} |  Abs. Loss: {absolute_loss:.2f} -----------'
                     logger.info(val_log)
                 
                 # checkpoint
@@ -206,9 +198,7 @@ class net:
                 logger.info(
                     '\n==========================================================================================='
                     '\n===========================================================================================\n'
-                   f'\nModel Parameters: {params[0]}'
-                   f'\nEncoder Parameters: {params[1]}'
-                   f'\nDecoder Parameters: {params[2]}\n'
+                   f'\nModel Parameters: {params[0]}\n'
                    f'\nCompleted Epochs: {self.epoch}/{epochs} | Avg Tr.Loss: {np.mean(batch_trlosses):.3f} | Absolute Loss: {absolute_loss:.3f}'
                    f'\nTotal Training Time: {int(minutes)}m {int(seconds):02d}s | Average Batch Time: {np.mean(batch_times):.3f}s'
                 )
@@ -249,8 +239,6 @@ class net:
         with torch.no_grad():
             for images, _ in self.valoader:
                 images = images.to(self.device)
-                if self.linear:
-                    images = images.view(images.size(0), -1)
                 reconstruction_images, _, _ = self.model(images)
                 reconstruction_images = reconstruction_images.view_as(images)
 
@@ -267,8 +255,6 @@ class net:
     # plot latent space
     def plat(self, latent_dims=(0, 1)):
         for i, (x, y) in enumerate(self.valoader):
-            if self.linear:
-                x = x.view(x.size(0), -1)
             x = x.to(self.device)
             z, _ = self.model.encoder(x)
             z = z.to('cpu').detach().numpy()
@@ -315,8 +301,6 @@ class net:
                     z = torch.Tensor([[x, y]]).to(self.device)
                 
                 x_hat = self.model.decoder(z)
-                if self.linear:
-                    x_hat = x_hat.reshape(28, 28)
                 x_hat = x_hat.to('cpu').detach().numpy()
                 img[(n-1-i)*w:(n-1-i+1)*w, j*w:(j+1)*w] = x_hat
         plt.title(f"Latent Space Images", fontsize = 15, fontweight = 'bold')
@@ -333,11 +317,7 @@ class net:
             data_iter = iter(self.valoader)
             images, _ = next(data_iter)
             images = images[:num_images].to(self.device)
-            if self.linear:
-                 images = images.view(num_images, -1)
             reconstruction_images, _, _ = self.model(images)
-            if self.linear:
-                reconstruction_images = reconstruction_images.view(num_images, 1, 28, 28)
             reconstruction_images = reconstruction_images.cpu()
 
         cols = min(num_images, 5)

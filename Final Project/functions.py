@@ -10,7 +10,21 @@ import time
 from IPython.display import clear_output
 
 import torch
+from torch.utils.data import Dataset, DataLoader
 import logging
+
+class SignalDataset(Dataset):
+    def __init__(self, signals, signal_type):
+        data_np = np.array(signals[signal_type])
+        self.data = torch.tensor(data_np, dtype=torch.float32)
+        self.labels = torch.tensor([0 if signal_type == 'NR' else 1 if signal_type == 'SR' else 2 if signal_type == 'FR' else 3 for _ in range(len(data_np))], dtype=torch.long)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx], self.labels[idx]
+        
 
 class experiment:
     def __init__(self, model, trloader, valoader, batch_size):
@@ -43,7 +57,7 @@ class experiment:
             raise FileNotFoundError(f"No checkpoint found at '{path}'")
     
     def train(self, optimizer, lsfn, epochs, live_plot=False, outliers=True, view_interval=100, averaging=True):
-        self.optimizer = optimizer
+        self.lsfn = lsfn
         # ========================== Logger Configuration ==========================
         torch.backends.cudnn.benchmark = True
         torch.set_printoptions(profile="full")
@@ -244,7 +258,7 @@ class experiment:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 inputs = inputs.unsqueeze(1)  # Add channel dimension
                 outputs = self.model(inputs)
-                loss = self.optimizer(outputs, labels)
+                loss = self.lsfn(outputs, labels)
                 running_loss += loss.item()
                 _, predicted = torch.max(outputs, 1)
                 total += labels.size(0)

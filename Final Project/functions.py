@@ -1,6 +1,8 @@
 import os
 from re import search
 import numpy as np
+import pandas as pd
+import seaborn as sns
 from astropy.io import fits
 import astropy.visualization as vis
 import matplotlib.pyplot as plt
@@ -41,6 +43,7 @@ class experiment:
             raise FileNotFoundError(f"No checkpoint found at '{path}'")
     
     def train(self, optimizer, lsfn, epochs, live_plot=False, outliers=True, view_interval=100, averaging=True):
+        self.optimizer = optimizer
         # ========================== Logger Configuration ==========================
         torch.backends.cudnn.benchmark = True
         torch.set_printoptions(profile="full")
@@ -136,7 +139,7 @@ class experiment:
                                         label=f'Validation Loss \nLowest: {min(valosses):.3f} \nAverage: {np.mean(valosses):.3f}',
                                         linewidth=3, color='gold', marker='o', markersize=3)
                             ax.set_ylabel("Loss")
-                            ax.set_xlabel(f"Batch Intervals (per {view_interval} batches)")
+                            ax.set_xlabel(f"Batch Iterations (per {view_interval} batches)")
                             ax.set_xlim(1, len(batch_trlosses) + 1)
                             ax.legend(title=f'Absolute loss: {round(absolute_loss, 3)}', bbox_to_anchor=(1, 1), loc='upper right')
 
@@ -170,20 +173,19 @@ class experiment:
                     logger.info(val_log)
                 
                 # checkpoint
-                os.makedirs('./Checkpoints', exist_ok=True)
-                self.save_checkpoint(epoch, optimizer, path=f'./Checkpoints/{self.timestamp}.pth')
+                self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
                 logger.info(f'Checkpoint saved for epoch {epoch}.')
 
             end_time = time.time()
             
         except KeyboardInterrupt:
             logger.warning("Training was interrupted by the user.")
-            self.save_checkpoint(epoch, optimizer, path=f'./Checkpoints/{self.timestamp} interrupted.pth')
+            self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
             logger.info(f'Checkpoint saved for epoch {epoch}.')
 
         except Exception as e:
             logger.error(f"An error has occurred: {e}", exc_info=True)
-            self.save_checkpoint(epoch, optimizer, path=f'./Checkpoints/{self.timestamp} error.pth')
+            self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
             logger.info(f'Checkpoint saved for epoch {epoch}.')
             raise
 
@@ -217,7 +219,7 @@ class experiment:
                             label=f'Validation Loss \nLowest: {min(valosses):.3f} \nAverage: {np.mean(valosses):.3f}',
                             linewidth=3, color='gold', marker='o', markersize=3)
                 ax.set_ylabel("Loss")
-                ax.set_xlabel(f"Batch Intervals (per {view_interval} batches)")
+                ax.set_xlabel(f"Batch Iterations (per {view_interval} batches)")
                 ax.set_xlim(1, len(batch_trlosses) + 1)
                 ax.legend(title=f'Absolute loss: {round(absolute_loss, 3)}', bbox_to_anchor=(1, 1), loc='upper right')
 
@@ -231,133 +233,56 @@ class experiment:
         return absolute_loss
 
 
-    def evaluate(self, threshold=0.1):
+    def evaluate(self):
+        self.model.eval()  # Set the model to evaluation mode
+        correct = 0
+        total = 0
+        running_loss = 0.0
+
+        with torch.no_grad():  # Disable gradient calculation
+            for inputs, labels in self.valoader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs = inputs.unsqueeze(1)  # Add channel dimension
+                outputs = self.model(inputs)
+                loss = self.optimizer(outputs, labels)
+                running_loss += loss.item()
+                _, predicted = torch.max(outputs, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        accuracy = correct / total
+        avg_loss = running_loss / len(self.valoader)
+        print(f'Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}')
+        
+        # return accuracy, avg_loss
+
+
+    def confusion_matrix(self):
+        from sklearn.metrics import confusion_matrix as cm
+
         self.model.eval()
-        total_correct = 0
-        total_pixels = 0
+        y_true = []
+        y_pred = []
 
         with torch.no_grad():
-            for images, _ in self.valoader:
-                images = images.to(self.device)
-                reconstruction_images, _, _ = self.model(images)
-                reconstruction_images = reconstruction_images.view_as(images)
+            for inputs, labels in self.valoader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs = inputs.unsqueeze(1)
+                outputs = self.model(inputs)
+                _, predicted = torch.max(outputs, 1)
 
-                # Calculate the number of correctly reconstructed pixels
-                correct_pixels = (torch.abs(images - reconstruction_images) < threshold).type(torch.float).sum().item()
-                total_correct += correct_pixels
-                total_pixels += images.numel()
+                y_true.extend(labels.cpu().numpy())
+                y_pred.extend(predicted.cpu().numpy())
+
+        cm = cm(y_true, y_pred)
+        classes = ['NR', 'SR', 'FR', 'Noise']
+        cm_df = pd.DataFrame(cm, index=classes, columns=classes)
         
-        accuracy = total_correct / total_pixels
-        print(f'Accuracy: {accuracy:.3f}')
-        self.accuracy = accuracy
-
-
-    # plot latent space
-    def plat(self, latent_dims=(0, 1)):
-        for i, (x, y) in enumerate(self.valoader):
-            x = x.to(self.device)
-            z, _ = self.model.encoder(x)
-            z = z.to('cpu').detach().numpy()
-            if self.model.latent_dim > 2:
-                # Select the specified dimensions for plotting
-                z_selected = z[:, latent_dims]
-            else:
-                z_selected = z
-        
-            plt.scatter(z_selected[:, 0], z_selected[:, 1], c=y, cmap='tab10')
-            plt.title(f"2D Latent Space", fontsize = 15, fontweight = 'bold')
-            plt.xlabel(f"Dimension {latent_dims[0]}", fontsize = 12)
-            plt.ylabel(f"Dimension {latent_dims[1]}", fontsize = 12)
-            if i > self.batch_size:
-                plt.colorbar()
-                break
-            plt.tight_layout()
-        plt.show(block=False)
-        plt.savefig(f"./Latent Space Plots/{self.timestamp}.png")
-    
-    # plot reconstructions
-    def prec(self, rangex=(-5, 10), rangey=(-10, 5), n=12, latent_dims = (0, 1)):
-        '''
-        range in the latent space to generate:
-            rangex = range of x values
-            rangey = range of y values
-
-        n = number of images to plot
-        '''
-        w = self.valoader.dataset[0][0].size()[1]  # image width
-        img = np.zeros((n*w, n*w))
-        for i, y in enumerate(np.linspace(*rangey, n)):
-            for j, x in enumerate(np.linspace(*rangex, n)):
-                if self.model.latent_dim > 2:
-                    # Initialize a latent vector with zeros
-                    z = torch.zeros((1, self.model.latent_dim)).to(self.device)
-                    # Set the chosen dimensions to the corresponding x, y values
-                    z[0, latent_dims[0]] = x
-                    z[0, latent_dims[1]] = y
-                    # Project other dimensions onto this plane with random values
-                    remaining_dims = [dim for dim in range(self.model.latent_dim) if dim not in latent_dims]
-                    z[0, remaining_dims] = torch.randn(len(remaining_dims)).to(self.device)
-                else:
-                    z = torch.Tensor([[x, y]]).to(self.device)
-                
-                x_hat = self.model.decoder(z)
-                x_hat = x_hat.to('cpu').detach().numpy()
-                img[(n-1-i)*w:(n-1-i+1)*w, j*w:(j+1)*w] = x_hat
-        plt.title(f"Latent Space Images", fontsize = 15, fontweight = 'bold')
-        plt.xlabel(f"Dimension {latent_dims[0]}", fontsize = 12)
-        plt.ylabel(f"Dimension {latent_dims[1]}", fontsize = 12)
-        plt.imshow(img, extent=[*rangex, *rangey])
-        plt.show(block=False)
-        plt.tight_layout()
-        plt.savefig(f"./Latent Space Plots/{self.timestamp}.png")
-
-    def pgen(self, num_images=10):
-        self.model.eval()
-        with torch.no_grad():
-            data_iter = iter(self.valoader)
-            images, _ = next(data_iter)
-            images = images[:num_images].to(self.device)
-            reconstruction_images, _, _ = self.model(images)
-            reconstruction_images = reconstruction_images.cpu()
-
-        cols = min(num_images, 5)
-        rows = (num_images + cols - 1) // cols
-        
-        fig = plt.figure(figsize=(15, 3 * rows))
-        gridspec = fig.add_gridspec(nrows=rows, ncols=12)
-
-        # Create subplots for original and reconstructed images with distinct background colors
-        axes_original = fig.add_subplot(gridspec[:, 0:6], facecolor='lightblue')
-        axes_reconstructed = fig.add_subplot(gridspec[:, 6:12])
-
-        # Turn off the axes for the overall subplots
-        axes_original.axis('off')
-        axes_reconstructed.axis('off')
-
-        for i in range(num_images):
-            row = i // cols
-            col = i % cols
-
-            ax1 = fig.add_subplot(gridspec[row, col])
-            ax2 = fig.add_subplot(gridspec[row, col + 6])
-
-            ax1.imshow(images[i].view(28, 28).cpu(), cmap='gray')
-            ax1.set_title(f"{i+1}", fontsize=10)
-            ax1.axis('off')
-
-            ax2.imshow(reconstruction_images[i].view(28, 28), cmap='gray')
-            ax2.set_title(f"{i+1}", fontsize=10)
-            ax2.axis('off')
-
-        # Set overall titles for each half
-        axes_original.set_title("Original Images", weight='bold', fontsize=15, pad=20)
-        axes_reconstructed.set_title("Reconstructed Images", weight='bold', fontsize=15, pad=20)
-
-        # Set the overall title for the entire figure
-        fig.suptitle(f"Accuracy: {self.accuracy:.3f}", fontsize=20, fontweight='bold', y=1)
-
-        plt.tight_layout()
-        plt.savefig(f"./Generated Samples/{self.timestamp}.png")
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm_df, annot=True, cmap='Blues', fmt='d', cbar=False)
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        plt.title('Confusion Matrix')
         plt.show()
 
 

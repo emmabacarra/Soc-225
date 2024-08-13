@@ -1,0 +1,3 @@
+08/13/24 12:01:57 Training initiated with the following parameters:
+Model Parameters: (('in_channels', 1), ('hidden_channels', 32), ('out_channels', 64), ('conv_kernel_size', 5), ('pool_kernel_size', 2), ('pool_stride', 2), ('dropout', 0.5), ('leak', 0.4), ('input_size', 8192))
+

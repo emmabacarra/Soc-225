@@ -189,6 +189,7 @@ class experiment:
                 # checkpoint
                 self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
                 logger.info(f'Checkpoint saved for epoch {epoch}.')
+                clear_output(wait=True)
 
             end_time = time.time()
             

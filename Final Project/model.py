@@ -17,13 +17,13 @@ class SignalClassifier(nn.Module):
 
         self.conv1 = nn.Conv1d(in_channels=in_channels, out_channels=hidden_channels, kernel_size=conv_kernel_size)
         self.conv2 = nn.Conv1d(in_channels=hidden_channels, out_channels=out_channels, kernel_size=conv_kernel_size)
-        self.pool = nn.MaxPool1d(kernel_size=pool_kernel_size, stride=pool_stride)
+        self.maxpool = nn.MaxPool1d(kernel_size=pool_kernel_size, stride=pool_stride)
         
         # Calculate the size after conv and pooling layers
         conv_output_size = self.get_size(input_size, conv_kernel_size, pool_kernel_size, pool_stride)
         
-        self.fc1 = nn.Linear(conv_output_size, 128)
-        self.fc2 = nn.Linear(128, 4)  # output classes
+        self.linear1 = nn.Linear(conv_output_size, 128)
+        self.linear2 = nn.Linear(128, 4)  # output classes
     
     def get_size(self, input_size, conv_kernel_size, pool_kernel_size, pool_stride):
         # Helper function to calculate the output size after conv and pooling layers
@@ -37,7 +37,7 @@ class SignalClassifier(nn.Module):
         return {name: getattr(self, name) for name in init_params if name != 'self'}
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
+        x = self.maxpool(F.relu(self.conv1(x)))
         x = nn.Dropout(self.dropout)(x)
         x = nn.LeakyReLU(self.leak)(x)
 
@@ -46,6 +46,6 @@ class SignalClassifier(nn.Module):
         x = nn.LeakyReLU(self.leak)(x)
 
         x = x.view(x.size(0), -1)  # Flatten layer
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
+        x = F.relu(self.linear1(x))
+        x = self.linear2(x)
         return x

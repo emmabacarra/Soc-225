@@ -5,6 +5,7 @@ import inspect
 class SignalClassifier(nn.Module):
     def __init__(self, in_channels=1, hidden_channels=32, out_channels=64, conv_kernel_size=5, pool_kernel_size=2, pool_stride=2, dropout=0.5, leak=0.1, input_size=8192):
         super(SignalClassifier, self).__init__()
+        # recording parameters
         self.in_channels = in_channels
         self.hidden_channels = hidden_channels
         self.out_channels = out_channels
@@ -15,6 +16,7 @@ class SignalClassifier(nn.Module):
         self.leak = leak
         self.input_size = input_size
 
+        # Define the architectural layers
         self.conv1 = nn.Conv1d(in_channels=in_channels, out_channels=hidden_channels, kernel_size=conv_kernel_size)
         self.conv2 = nn.Conv1d(in_channels=hidden_channels, out_channels=out_channels, kernel_size=conv_kernel_size)
         self.maxpool = nn.MaxPool1d(kernel_size=pool_kernel_size, stride=pool_stride)
@@ -37,6 +39,7 @@ class SignalClassifier(nn.Module):
         return {name: getattr(self, name) for name in init_params if name != 'self'}
 
     def forward(self, x):
+        # Connect the layers together and forward pass the input
         x = self.maxpool(F.relu(self.conv1(x)))
         x = nn.Dropout(self.dropout)(x)
         x = nn.LeakyReLU(self.leak)(x)

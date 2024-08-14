@@ -13,7 +13,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import logging
 
-class SignalDataset(Dataset):
+class SignalDataset(Dataset): # custom dataset class to build for each strain
     def __init__(self, signals, signal_type):
         data_np = np.array(signals[signal_type])
         self.data = torch.tensor(data_np, dtype=torch.float32)
@@ -38,7 +38,7 @@ class experiment:
         # self.x_dim = self.trloader.dataset[0][0].size()[1]*self.trloader.dataset[0][0].size()[2]
         self.train_size = len(self.trloader.dataset)
 
-    def save_checkpoint(self, epoch, optimizer, path='checkpoint.pth'):
+    def save_checkpoint(self, epoch, optimizer, path='checkpoint.pth'): # for saving the model state
         state = {
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
@@ -46,7 +46,7 @@ class experiment:
         }
         torch.save(state, path)
 
-    def load_checkpoint(self, optimizer, path='checkpoint.pth'):
+    def load_checkpoint(self, optimizer, path='checkpoint.pth'): # for going back to a previous training session
         if os.path.isfile(path):
             checkpoint = torch.load(path)
             self.model.load_state_dict(checkpoint['state_dict'])
@@ -88,6 +88,7 @@ class experiment:
         absolute_loss = 0
         self.epoch = 0
 
+        # log the model parameters
         params = [tuple(self.model.params().items())]
         logger.info(f'Training initiated with the following parameters:'
                     f'\nModel Parameters: {params[0]}\n')
@@ -97,21 +98,23 @@ class experiment:
             for epoch in range(1, epochs + 1):
                 self.epoch = epoch
                 # ========================= training losses =========================
-                self.model.train()
+                self.model.train() # <-- set the model to training mode
                 loss_ct, counter = 0, 0
-                for i, (batch, labels) in enumerate(self.trloader):
+                for i, (batch, labels) in enumerate(self.trloader): # iterate over the training loader
                     batch_start = time.time()
                     counter += 1
 
                     batch, labels = batch.to(self.device), labels.to(self.device)
                     batch = batch.unsqueeze(1) # <-- add channel dimension
-                    optimizer.zero_grad()
+                    optimizer.zero_grad() # zero the gradients
 
+                    # forward pass
                     outputs = self.model(batch)
                     batch_loss = lsfn(outputs, labels)
                     loss_ct += batch_loss.item()
                     absolute_loss += batch_loss.item()
 
+                    # log the batch loss
                     batch_time = time.time() - batch_start
                     elapsed_time = time.time() - start_time
                     minutes, seconds = divmod(int(elapsed_time), 60)
@@ -124,12 +127,12 @@ class experiment:
                     # ------------------------- Recording Loss ------------------------------------------------------
                     if (i + 1) % view_interval == 0 or i == len(self.trloader) - 1:  # <-- plot for every specified interval of batches (and also account for the last batch)
                         avg_loss = loss_ct / counter
-                        if outliers:
+                        if outliers: # include all losses in the plot
                             if averaging:
                                 batch_trlosses.append(avg_loss)  # <-- average loss of the interval
                             else:
                                 batch_trlosses.append(batch_loss.item())
-                        if not outliers and epoch > 1:
+                        if not outliers and epoch > 1: # exclude outliers from starting point of training
                             if averaging:
                                 batch_trlosses.append(avg_loss)  # <-- average loss of the interval
                             else:
@@ -139,7 +142,7 @@ class experiment:
                         loss_ct, counter = 0, 0  # reset for next interval
 
                         # ------------------------- FOR REAL-TIME PLOTTING ------------------------------------------------------
-                        if live_plot:  # Plot losses and validation accuracy in real-time
+                        if live_plot:  # Plot losses and validation accuracy in real-time (when specified)
                             fig, ax = plt.subplots(figsize=(12, 5))
                             clear_output(wait=True)
                             ax.clear()
@@ -159,26 +162,28 @@ class experiment:
 
                             plt.show(block=False)
                     # -------------------------------------------------------------------------------
-                    batch_loss.backward()
-                    optimizer.step()
+                    batch_loss.backward() # backpropagate the loss
+                    optimizer.step() # update the model parameters
 
                 # ========================= validation losses =========================
-                self.model.eval()
-                with torch.no_grad():
-                    tot_valoss = 0
-                    for batch, labels in self.valoader:
+                self.model.eval() # <-- set the model to evaluation mode
+                with torch.no_grad(): # <-- disable gradient calculation
+                    tot_valoss = 0 
+                    for batch, labels in self.valoader: # iterate over the validation loader
 
                         batch, labels = batch.to(self.device), labels.to(self.device)
                         batch = batch.unsqueeze(1)  # <-- add channel dimension
 
-                        outputs = self.model(batch)
-                        batch_loss = lsfn(outputs, labels)
+                        outputs = self.model(batch) # get the model predictions
+                        batch_loss = lsfn(outputs, labels) # calculate the loss
 
-                        tot_valoss += batch_loss.item()
+                        tot_valoss += batch_loss.item() # update the total loss
 
+                    # calculate the average loss
                     avg_val_loss = tot_valoss / len(self.valoader)
                     valosses.append(avg_val_loss)
 
+                    # log the validation loss
                     elapsed_time = time.time() - start_time
                     minutes, seconds = divmod(int(elapsed_time), 60)
                     learning_rate = optimizer.param_groups[0]['lr']
@@ -193,12 +198,12 @@ class experiment:
 
             end_time = time.time()
             
-        except KeyboardInterrupt:
+        except KeyboardInterrupt: # <-- when training process is interrupted
             logger.warning("Training was interrupted by the user.")
             self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
             logger.info(f'Checkpoint saved for epoch {epoch}.')
 
-        except Exception as e:
+        except Exception as e: # <-- catch any other exceptions
             logger.error(f"An error has occurred: {e}", exc_info=True)
             self.save_checkpoint(epoch, optimizer, path='saved_model.pth')
             logger.info(f'Checkpoint saved for epoch {epoch}.')
@@ -206,11 +211,13 @@ class experiment:
 
         finally:
             try:
-                end_time = time.time()
+                end_time = time.time() # <-- end time for the training process
 
+                # Save the model
                 torch.save(self.model.state_dict(), 'saved_model.pth')
                 logger.info(f"Model saved as 'saved_model.pth'.")
 
+                # log the training summary
                 minutes, seconds = divmod(end_time - start_time, 60)
                 logger.info(
                     '\n==========================================================================================='
@@ -256,15 +263,16 @@ class experiment:
 
         with torch.no_grad():  # Disable gradient calculation
             for inputs, labels in self.valoader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs, labels = inputs.to(self.device), labels.to(self.device) # Move to GPU
                 inputs = inputs.unsqueeze(1)  # Add channel dimension
-                outputs = self.model(inputs)
-                loss = self.lsfn(outputs, labels)
-                running_loss += loss.item()
-                _, predicted = torch.max(outputs, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
+                outputs = self.model(inputs) # Get the model predictions
+                loss = self.lsfn(outputs, labels) # Calculate the loss
+                running_loss += loss.item() # Update the running loss
+                _, predicted = torch.max(outputs, 1) # Get the predicted labels
+                total += labels.size(0) # Update the total count
+                correct += (predicted == labels).sum().item() # Update the correct count
 
+        # Calculate the accuracy and average loss
         accuracy = correct / total
         avg_loss = running_loss / len(self.valoader)
         print(f'Test Loss: {avg_loss:.4f}, Test Accuracy: {accuracy:.4f}')
@@ -275,24 +283,29 @@ class experiment:
     def confusion_matrix(self):
         from sklearn.metrics import confusion_matrix as cm
 
+        # Set the model to evaluation mode
         self.model.eval()
         y_true = []
         y_pred = []
 
-        with torch.no_grad():
+        with torch.no_grad(): # Disable gradient calculation
+            # Iterate over the validation loader
             for inputs, labels in self.valoader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                inputs = inputs.unsqueeze(1)
-                outputs = self.model(inputs)
-                _, predicted = torch.max(outputs, 1)
+                inputs, labels = inputs.to(self.device), labels.to(self.device) # Move to GPU
+                inputs = inputs.unsqueeze(1) # Add channel dimension
+                outputs = self.model(inputs) # Get the model predictions
+                _, predicted = torch.max(outputs, 1) # Get the predicted labels
 
+                # Append the true and predicted labels to the lists
                 y_true.extend(labels.cpu().numpy())
                 y_pred.extend(predicted.cpu().numpy())
 
+        # Generate the confusion matrix
         cm = cm(y_true, y_pred)
         classes = ['NR', 'SR', 'FR', 'Noise']
         cm_df = pd.DataFrame(cm, index=classes, columns=classes)
         
+        # Plot the confusion matrix
         plt.figure(figsize=(8, 6))
         sns.heatmap(cm_df, annot=True, cmap='Blues', fmt='d', cbar=False)
         plt.xlabel('Predicted')
